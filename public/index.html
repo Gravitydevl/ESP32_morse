@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Морзе Водопад</title>
+  <title>Morse Waterfall</title>
   <style>
-    canvas { background: black; display: block; margin: auto; }
+    body { background: black; margin: 0; overflow: hidden; }
+    canvas { display: block; margin: auto; }
   </style>
 </head>
 <body>
@@ -12,15 +13,13 @@
 <script>
   const canvas = document.getElementById('waterfall');
   const ctx = canvas.getContext('2d');
-
-  const ws = new WebSocket('wss://yourserver.example.com'); // <-- сюда IP сервера или Glitch/Vercel
   const waterfall = [];
+  const socket = new WebSocket(`wss://${location.host}/api/ws`);
 
-  // Аудио контекст
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
   function drawWaterfall() {
-    ctx.drawImage(canvas, 0, 1); // Сдвигаем вверх на 1 пиксель
+    ctx.drawImage(canvas, 0, 1); // сдвигаем вверх
     ctx.fillStyle = 'black';
     ctx.fillRect(0, canvas.height - 1, canvas.width, 1);
 
@@ -35,25 +34,20 @@
   }
 
   function playTone(freq, duration) {
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-
-    oscillator.start();
-    oscillator.stop(audioCtx.currentTime + duration);
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    gain.gain.value = 0.3;
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
   }
 
-  ws.onmessage = function(event) {
+  socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
     waterfall.push(data);
-
-    // Звук
     const duration = data.type === 'dot' ? 0.1 : 0.3;
     playTone(data.frequency || 600, duration);
   };
