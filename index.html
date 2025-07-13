@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Морзе Водопад</title>
+  <style>
+    canvas { background: black; display: block; margin: auto; }
+  </style>
+</head>
+<body>
+<canvas id="waterfall" width="600" height="300"></canvas>
+
+<script>
+  const canvas = document.getElementById('waterfall');
+  const ctx = canvas.getContext('2d');
+
+  const ws = new WebSocket('wss://yourserver.example.com'); // <-- сюда IP сервера или Glitch/Vercel
+  const waterfall = [];
+
+  // Аудио контекст
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function drawWaterfall() {
+    ctx.drawImage(canvas, 0, 1); // Сдвигаем вверх на 1 пиксель
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, canvas.height - 1, canvas.width, 1);
+
+    const last = waterfall[waterfall.length - 1];
+    if (last) {
+      const x = (Date.now() / 50) % canvas.width;
+      ctx.fillStyle = last.type === 'dot' ? 'lime' : 'red';
+      ctx.fillRect(x, canvas.height - 1, 2, 1);
+    }
+
+    requestAnimationFrame(drawWaterfall);
+  }
+
+  function playTone(freq, duration) {
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + duration);
+  }
+
+  ws.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    waterfall.push(data);
+
+    // Звук
+    const duration = data.type === 'dot' ? 0.1 : 0.3;
+    playTone(data.frequency || 600, duration);
+  };
+
+  drawWaterfall();
+</script>
+</body>
+</html>
