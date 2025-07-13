@@ -144,6 +144,9 @@
     .word-space {
       margin-left: 15px;
     }
+    .letter-space {
+      margin-left: 5px;
+    }
   </style>
 </head>
 <body>
@@ -152,10 +155,7 @@
     <div class="left-panel">
       <h3>Active Channels</h3>
       <div class="active-channels" id="activeChannels">
-        <div class="channel-item">444 (3 users)</div>
-        <div class="channel-item">500 (1 user)</div>
-        <div class="channel-item active">600 (you)</div>
-        <div class="channel-item">700 (2 users)</div>
+        <!-- Channels will be populated by JavaScript -->
       </div>
     </div>
     
@@ -165,7 +165,7 @@
       
       <div class="channel-control">
         <span>Channel:</span>
-        <input type="number" id="channelInput" value="600" min="1" max="999">
+        <input type="number" id="channelInput" value="444" min="1" max="999">
         <button id="changeChannel">Change</button>
         <div class="signal-indicator" id="signalIndicator"></div>
       </div>
@@ -198,8 +198,15 @@
       '..-': 'U', '...-': 'V', '.--': 'W', '-..-': 'X', '-.--': 'Y',
       '--..': 'Z', '.----': '1', '..---': '2', '...--': '3',
       '....-': '4', '.....': '5', '-....': '6', '--...': '7',
-      '---..': '8', '----.': '9', '-----': '0', '/': ' '
+      '---..': '8', '----.': '9', '-----': '0', 
+      '--..--': ',', '.-.-.-': '.', '..--..': '?', '-..-.': '/',
+      '-....-': '-', '-.--.': '(', '-.--.-': ')', '.--.-.': '@',
+      '---...': ':', '-.-.-.': ';', '-...-': '=', '.-.-.': '+',
+      '..--.-': '_', '.-..-.': '"', '...-..-': '$', '.----.': "'",
+      '-.-.--': '!'
     };
+
+
 
     // DOM elements
     const canvas = document.getElementById("waterfall");
@@ -215,14 +222,16 @@
     const activeChannels = document.getElementById("activeChannels");
 
     // App state
-    let currentChannel = 600;
+    let currentChannel = 444;
     let displayMode = 'chars';
     let isTransmitting = false;
     let lastSymbolTime = 0;
     let currentSymbol = '';
     let currentWord = '';
     let decoderTimeout = null;
+    let wordTimeout = null;
     let consoleVisible = true;
+    let activeUsers = {};
 
     // Audio context
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -236,6 +245,9 @@
       startNoise();
       setupEventListeners();
       logToConsole(`Connected to channel ${currentChannel}`, 'info');
+      
+      // Initialize active users
+      activeUsers[currentChannel] = 1;
       
       // Simulate active channels updates
       setInterval(updateActiveChannels, 5000);
@@ -274,8 +286,7 @@
       // Console toggle
       consoleHeader.onclick = toggleConsole;
 
-      // Simulate incoming signals
-      simulateIncomingSignals();
+      // Simulate incoming signal
     }
 
     // Waterfall display
@@ -335,30 +346,59 @@
     }
 
     function processSignal(duration) {
-      if (duration < 200) { // Dot
-        currentSymbol += '.';
-        if (displayMode === 'symbols') logToConsole('.', 'symbol');
-      } else if (duration >= 200) { // Dash
-        currentSymbol += '-';
-        if (displayMode === 'symbols') logToConsole('-', 'symbol');
+      const now = Date.now();
+      const signalGap = now - lastSymbolTime;
+      
+      // Определяем тип сигнала (точка/тире)
+      if (isTransmitting) {
+        const isDash = duration >= 200;
+        currentSymbol += isDash ? '-' : '.';
+        if (displayMode === 'symbols') {
+          logToConsole(isDash ? '-' : '.', 'symbol');
+        }
+      } 
+      // Определяем паузы между символами и словами
+      else if (signalGap > 700 && currentWord) {
+        // Пауза между словами
+        currentWord += ' ';
+        if (displayMode === 'chars') {
+          logToConsole(' ', 'word');
+        }
+      } else if (signalGap > 200 && currentSymbol) {
+        // Пауза между символами
+        if (displayMode === 'chars') {
+          const char = morseCode[currentSymbol] || '?';
+          logToConsole(char, 'char');
+          currentWord += char;
+        }
+        currentSymbol = '';
       }
       
-      lastSymbolTime = Date.now();
-      resetDecoderTimeout();
+      lastSymbolTime = now;
     }
+
 
     function resetDecoderTimeout() {
       if (decoderTimeout) clearTimeout(decoderTimeout);
       
       decoderTimeout = setTimeout(() => {
         decodeSymbol();
-        
-        // Check for word space after symbol timeout
-        if (Date.now() - lastSymbolTime > 700 && currentWord) {
+        // Add space between letters
+        if (displayMode === 'chars' && currentWord) {
+          logToConsole(' ', 'letter-space');
+        }
+      }, 400);
+    }
+
+    function resetWordTimeout() {
+      if (wordTimeout) clearTimeout(wordTimeout);
+      
+      wordTimeout = setTimeout(() => {
+        if (currentWord) {
           logToConsole(' ', 'word');
           currentWord = '';
         }
-      }, 300);
+      }, 700);
     }
 
     function decodeSymbol() {
@@ -413,7 +453,19 @@
     function changeChannel() {
       const newChannel = parseInt(channelInput.value);
       if (newChannel >= 1 && newChannel <= 999) {
+        // Remove from old channel
+        if (activeUsers[currentChannel]) {
+          activeUsers[currentChannel]--;
+          if (activeUsers[currentChannel] <= 0) {
+            delete activeUsers[currentChannel];
+          }
+        }
+        
         currentChannel = newChannel;
+        
+        // Add to new channel
+        activeUsers[currentChannel] = (activeUsers[currentChannel] || 0) + 1;
+        
         logToConsole(`Switched to channel ${currentChannel}`, 'info');
         updateActiveChannels();
       } else {
@@ -422,21 +474,20 @@
     }
 
     function updateActiveChannels() {
-      // In a real app, this would come from a WebSocket server
-      const channels = [
-        { id: 444, users: Math.floor(Math.random() * 3) + 1 },
-        { id: 500, users: Math.floor(Math.random() * 2) + 1 },
-        { id: currentChannel, users: 1 },
-        { id: 700, users: Math.floor(Math.random() * 3) + 1 }
-      ];
-      
       activeChannels.innerHTML = '';
-      channels.forEach(channel => {
+      
+      // Sort channels numerically
+      const sortedChannels = Object.keys(activeUsers)
+        .map(Number)
+        .sort((a, b) => a - b);
+      
+      sortedChannels.forEach(channel => {
+        const users = activeUsers[channel];
         const div = document.createElement('div');
-        div.className = `channel-item ${channel.id === currentChannel ? 'active' : ''}`;
-        div.textContent = `${channel.id} (${channel.users} user${channel.users !== 1 ? 's' : ''})`;
+        div.className = `channel-item ${channel === currentChannel ? 'active' : ''}`;
+        div.textContent = `${channel} (${users} user${users !== 1 ? 's' : ''})`;
         div.onclick = () => {
-          channelInput.value = channel.id;
+          channelInput.value = channel;
           changeChannel();
         };
         activeChannels.appendChild(div);
@@ -497,51 +548,6 @@
       logToConsole(`Display mode: ${mode}`, 'info');
     }
 
-    // Simulate incoming signals
-    function simulateIncomingSignals() {
-      setInterval(() => {
-        if (Math.random() > 0.95 && !isTransmitting) {
-          simulateSignal();
-        }
-      }, 8000);
-    }
-
-    function simulateSignal() {
-      signalIndicator.classList.add('active');
-      
-      // Random Morse word
-      const words = ['SOS', 'CQ', 'TEST', 'HELLO', 'MORSE'];
-      const word = words[Math.floor(Math.random() * words.length)];
-      
-      let delay = 0;
-      
-      // Convert word to Morse code
-      const morseWord = word.split('').map(char => {
-        return Object.entries(morseCode).find(([code, c]) => c === char)?.[0] || '';
-      }).filter(Boolean);
-      
-      morseWord.forEach((code, i) => {
-        code.split('').forEach(symbol => {
-          setTimeout(() => {
-            drawSignalOnWaterfall(symbol === '.' ? 100 : 300);
-          }, delay);
-          delay += (symbol === '.' ? 100 : 300) + 100;
-        });
-        
-        // Character space
-        delay += 300;
-      });
-      
-      setTimeout(() => {
-        signalIndicator.classList.remove('active');
-        
-        // Display the decoded word
-        if (displayMode === 'chars') {
-          logToConsole(' ', 'word');
-          logToConsole(word, 'char');
-        }
-      }, delay);
-    }
 
     function drawSignalOnWaterfall(duration) {
       const startTime = Date.now();
