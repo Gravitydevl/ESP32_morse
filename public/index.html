@@ -1,67 +1,559 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Morse Waterfall</title>
+  <title>Morse SDR Simulator</title>
   <style>
-    body { background: black; margin: 0; overflow: hidden; }
-    canvas { display: block; margin: auto; }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #111;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 800px;
+    }
+    canvas {
+      background: black;
+      border: 2px solid #333;
+      image-rendering: pixelated;
+      display: block;
+      margin-bottom: 10px;
+      width: 100%;
+    }
+    #btn {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: #333;
+      color: white;
+      border: none;
+      font-size: 16px;
+      margin: 10px auto;
+      display: block;
+      cursor: pointer;
+    }
+    #btn:active {
+      background: #555;
+    }
+    #btn.transmitting {
+      background: #600;
+    }
+    .controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button.record {
+      background: #222;
+      color: white;
+      border: 1px solid #555;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+    .console {
+      width: 100%;
+      height: 150px;
+      background: #000;
+      border: 1px solid #333;
+      margin-top: 20px;
+      padding: 10px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+    .channel-control {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .channel-control input {
+      width: 80px;
+      padding: 8px;
+      background: #222;
+      color: white;
+      border: 1px solid #555;
+    }
+    .display-mode {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+    }
+    .signal-indicator {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #333;
+      margin-left: 10px;
+    }
+    .signal-indicator.active {
+      background: #0f0;
+    }
   </style>
 </head>
 <body>
-<canvas id="waterfall" width="600" height="300"></canvas>
+  <h1>Morse SDR Simulator</h1>
+  <div class="container">
+    <canvas id="waterfall" width="800" height="500"></canvas>
+    <button id="btn">TRANSMIT</button>
+    
+    <div class="channel-control">
+      <span>Channel:</span>
+      <input type="number" id="channelInput" value="444" min="1" max="999">
+      <button id="changeChannel">Change</button>
+      <div class="signal-indicator" id="signalIndicator"></div>
+    </div>
+    
+    <div class="display-mode">
+      <span>Display Mode:</span>
+      <button id="showChars" class="active">Characters</button>
+      <button id="showSymbols">Symbols</button>
+    </div>
+    
+    <div class="controls">
+      <button class="record" id="startRec">Start Recording</button>
+      <button class="record" id="stopRec" disabled>Stop & Download</button>
+      <button class="record" id="clearConsole">Clear Console</button>
+    </div>
+    
+    <div class="console" id="console"></div>
+  </div>
 
-<script>
-  const canvas = document.getElementById('waterfall');
-  const ctx = canvas.getContext('2d');
-  const waterfall = [];
-  const socket = new WebSocket(`wss://${location.host}/api/ws`);
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.min.js"></script>
+  <script>
+    // Morse decoder configuration
+    const morseCode = {
+      '.-': 'A', '-...': 'B', '-.-.': 'C', '-..': 'D', '.': 'E',
+      '..-.': 'F', '--.': 'G', '....': 'H', '..': 'I', '.---': 'J',
+      '-.-': 'K', '.-..': 'L', '--': 'M', '-.': 'N', '---': 'O',
+      '.--.': 'P', '--.-': 'Q', '.-.': 'R', '...': 'S', '-': 'T',
+      '..-': 'U', '...-': 'V', '.--': 'W', '-..-': 'X', '-.--': 'Y',
+      '--..': 'Z', '.----': '1', '..---': '2', '...--': '3',
+      '....-': '4', '.....': '5', '-....': '6', '--...': '7',
+      '---..': '8', '----.': '9', '-----': '0', '/': ' '
+    };
 
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // DOM elements
+    const canvas = document.getElementById("waterfall");
+    const ctx = canvas.getContext("2d");
+    const btn = document.getElementById("btn");
+    const startBtn = document.getElementById("startRec");
+    const stopBtn = document.getElementById("stopRec");
+    const consoleElement = document.getElementById("console");
+    const channelInput = document.getElementById("channelInput");
+    const changeChannelBtn = document.getElementById("changeChannel");
+    const showCharsBtn = document.getElementById("showChars");
+    const showSymbolsBtn = document.getElementById("showSymbols");
+    const clearConsoleBtn = document.getElementById("clearConsole");
+    const signalIndicator = document.getElementById("signalIndicator");
 
-  function drawWaterfall() {
-    ctx.drawImage(canvas, 0, 1); // сдвигаем вверх
-    ctx.fillStyle = 'black';
-    ctx.fillRect(0, canvas.height - 1, canvas.width, 1);
+    // Audio context
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let oscillator = null;
+    let noiseNode = null;
+    let isTransmitting = false;
+    const centerX = canvas.width / 2;
 
-    const last = waterfall[waterfall.length - 1];
-    if (last) {
-      const x = (Date.now() / 50) % canvas.width;
-      ctx.fillStyle = last.type === 'dot' ? 'lime' : 'red';
-      ctx.fillRect(x, canvas.height - 1, 2, 1);
+    // Morse decoder variables
+    let currentChannel = 444;
+    let displayMode = 'chars'; // 'chars' or 'symbols'
+    let signalHistory = [];
+    let lastSignalTime = 0;
+    let pauseStartTime = 0;
+    let currentSymbol = '';
+    let currentWord = '';
+    let decoderTimeout = null;
+
+    // Audio recording
+    let dest = audioCtx.createMediaStreamDestination();
+    let recorder = null;
+    let chunks = [];
+
+    // Initialize
+    function init() {
+      drawFullNoiseBackground();
+      startNoise();
+      setupEventListeners();
+      logToConsole(`Initialized on channel ${currentChannel}`);
     }
 
-    requestAnimationFrame(drawWaterfall);
-  }
+    function setupEventListeners() {
+      // Transmission controls
+      btn.onmousedown = startTransmit;
+      btn.onmouseup = stopTransmit;
+      btn.ontouchstart = e => { e.preventDefault(); startTransmit(); };
+      btn.ontouchend = e => { e.preventDefault(); stopTransmit(); };
 
-  function playTone(freq, duration) {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.frequency.value = freq;
-    osc.type = 'sine';
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    gain.gain.value = 0.3;
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
-  }
+      document.addEventListener("keydown", e => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          startTransmit();
+        }
+      });
 
-  socket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    waterfall.push(data);
-    const duration = data.type === 'dot' ? 0.1 : 0.3;
-    playTone(data.frequency || 600, duration);
-  };
-  
-  setInterval(() => {
-  const type = Math.random() > 0.5 ? 'dot' : 'dash';
-  const freq = 600 + Math.random() * 100;
-  socket.dispatchEvent(new MessageEvent('message', {
-    data: JSON.stringify({ type, frequency: freq })
-  }));
-}, 300);
+      document.addEventListener("keyup", e => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          stopTransmit();
+        }
+      });
 
+      document.addEventListener("touchstart", () => {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      }, { once: true });
 
-  drawWaterfall();
-</script>
+      // Recording controls
+      startBtn.onclick = startRecording;
+      stopBtn.onclick = stopRecording;
+      clearConsoleBtn.onclick = clearConsole;
+
+      // Channel controls
+      changeChannelBtn.onclick = changeChannel;
+
+      // Display mode
+      showCharsBtn.onclick = () => setDisplayMode('chars');
+      showSymbolsBtn.onclick = () => setDisplayMode('symbols');
+
+      // Simulate incoming signals
+      simulateIncomingSignals();
+    }
+
+    // Audio functions
+    function startTone() {
+      if (oscillator) return;
+      stopNoise();
+      oscillator = audioCtx.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.3;
+
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      gain.connect(dest);
+      oscillator.start();
+    }
+
+    function stopTone() {
+      if (oscillator) {
+        oscillator.stop();
+        oscillator.disconnect();
+        oscillator = null;
+      }
+      startNoise();
+    }
+
+    function startNoise() {
+      if (noiseNode) return;
+      const bufferSize = 1024;
+      noiseNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+      const volume = 0.01;
+      noiseNode.onaudioprocess = e => {
+        const out = e.outputBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          out[i] = (Math.random() * 2 - 1) * volume;
+        }
+      };
+      noiseNode.connect(audioCtx.destination);
+      noiseNode.connect(dest);
+    }
+
+    function stopNoise() {
+      if (noiseNode) {
+        noiseNode.disconnect();
+        noiseNode = null;
+      }
+    }
+
+    // Waterfall display
+    function drawFullNoiseBackground() {
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const b = 10 + Math.random() * 40;
+          ctx.fillStyle = `rgb(0, 0, ${b})`;
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    }
+
+    function drawWaterfallLine() {
+      // Shift image up
+      const imageData = ctx.getImageData(0, 1, canvas.width, canvas.height - 1);
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Clear bottom line
+      ctx.clearRect(0, canvas.height - 1, canvas.width, 1);
+      
+      // Draw new line at bottom
+      for (let x = 0; x < canvas.width; x++) {
+        let r = 0, g = 0, b = 0;
+
+        // Thin signal (1-2 pixels wide)
+        if (isTransmitting && Math.abs(x - centerX) < 1 + Math.random()) {
+          const intensity = 150 + Math.random() * 105;
+          r = intensity;
+          b = intensity;
+        } else {
+          b = 10 + Math.random() * 40; // base noise level
+        }
+
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(x, canvas.height - 1, 1, 1);
+      }
+    }
+
+    // Transmission control
+    function startTransmit() {
+      if (isTransmitting) return;
+      isTransmitting = true;
+      startTone();
+      btn.classList.add('transmitting');
+      signalHistory.push({ type: 'start', time: Date.now() });
+    }
+
+    function stopTransmit() {
+      if (!isTransmitting) return;
+      isTransmitting = false;
+      stopTone();
+      btn.classList.remove('transmitting');
+      signalHistory.push({ type: 'end', time: Date.now() });
+      processSignalHistory();
+    }
+
+    // Morse decoder
+    function processSignalHistory() {
+      if (signalHistory.length < 2) return;
+      
+      const lastSignal = signalHistory[signalHistory.length - 2];
+      const lastEnd = signalHistory[signalHistory.length - 1];
+      
+      if (lastSignal.type === 'start' && lastEnd.type === 'end') {
+        const duration = lastEnd.time - lastSignal.time;
+        
+        if (duration < 200) { // Dot
+          currentSymbol += '.';
+          logToConsole('.', 'symbol');
+        } else if (duration >= 200) { // Dash
+          currentSymbol += '-';
+          logToConsole('-', 'symbol');
+        }
+        
+        lastSignalTime = lastEnd.time;
+        resetDecoderTimeout();
+      }
+    }
+
+    function resetDecoderTimeout() {
+      if (decoderTimeout) clearTimeout(decoderTimeout);
+      
+      decoderTimeout = setTimeout(() => {
+        decodeSymbol();
+      }, 300); // Timeout between symbols
+    }
+
+    function decodeSymbol() {
+      if (currentSymbol.length === 0) return;
+      
+      const char = morseCode[currentSymbol] || `[${currentSymbol}]`;
+      
+      if (displayMode === 'chars') {
+        logToConsole(char, 'char');
+      }
+      
+      currentWord += char;
+      
+      // Check for word space
+      if (Date.now() - lastSignalTime > 700) {
+        if (currentWord.trim().length > 0) {
+          logToConsole(' ', 'word');
+        }
+        currentWord = '';
+      }
+      
+      currentSymbol = '';
+    }
+
+    // Console functions
+    function logToConsole(message, type = 'info') {
+      const span = document.createElement('span');
+      
+      switch(type) {
+        case 'symbol':
+          span.style.color = '#bb86fc';
+          break;
+        case 'char':
+          span.style.color = '#4caf50';
+          span.style.fontWeight = 'bold';
+          break;
+        case 'word':
+          span.style.marginLeft = '10px';
+          break;
+        case 'error':
+          span.style.color = '#f44336';
+          break;
+        default:
+          span.style.color = '#03a9f4';
+      }
+      
+      span.textContent = message;
+      consoleElement.appendChild(span);
+      consoleElement.scrollTop = consoleElement.scrollHeight;
+    }
+
+    function clearConsole() {
+      consoleElement.innerHTML = '';
+      currentSymbol = '';
+      currentWord = '';
+      signalHistory = [];
+    }
+
+    // Channel control
+    function changeChannel() {
+      const newChannel = parseInt(channelInput.value);
+      if (newChannel >= 1 && newChannel <= 999) {
+        currentChannel = newChannel;
+        logToConsole(`Switched to channel ${currentChannel}`);
+      } else {
+        logToConsole('Invalid channel (1-999)', 'error');
+      }
+    }
+
+    // Display mode
+    function setDisplayMode(mode) {
+      displayMode = mode;
+      showCharsBtn.classList.toggle('active', mode === 'chars');
+      showSymbolsBtn.classList.toggle('active', mode === 'symbols');
+      logToConsole(`Display mode: ${mode}`);
+    }
+
+    // Simulate incoming signals (for demo)
+    function simulateIncomingSignals() {
+      // Random signals
+      setInterval(() => {
+        if (Math.random() > 0.95 && !isTransmitting) {
+          simulateSignal();
+        }
+      }, 5000);
+    }
+
+    function simulateSignal() {
+      signalIndicator.classList.add('active');
+      const duration = 100 + Math.random() * 200;
+      
+      setTimeout(() => {
+        signalIndicator.classList.remove('active');
+      }, duration);
+      
+      // Random Morse code (SOS for example)
+      const codes = ['...', '---', '...'];
+      let delay = 0;
+      
+      codes.forEach((code, i) => {
+        code.split('').forEach((symbol, j) => {
+          setTimeout(() => {
+            const isDot = symbol === '.';
+            drawSignalOnWaterfall(isDot ? 100 : 300);
+            
+            if (displayMode === 'symbols') {
+              logToConsole(symbol, 'symbol');
+            }
+          }, delay);
+          
+          delay += (isDot ? 100 : 300) + 100;
+        });
+        
+        if (i < codes.length - 1) {
+          setTimeout(() => {
+            if (displayMode === 'chars') {
+              const char = morseCode[codes[i]] || `[${codes[i]}]`;
+              logToConsole(char, 'char');
+            }
+          }, delay - 100);
+        }
+        
+        delay += 300;
+      });
+      
+      setTimeout(() => {
+        if (displayMode === 'chars') {
+          logToConsole(' ', 'word');
+          logToConsole('SOS', 'char');
+        }
+      }, delay);
+    }
+
+    function drawSignalOnWaterfall(duration) {
+      const startTime = Date.now();
+      const interval = setInterval(() => {
+        if (Date.now() - startTime > duration) {
+          clearInterval(interval);
+          return;
+        }
+        
+        // Draw signal line
+        const imageData = ctx.getImageData(0, 1, canvas.width, canvas.height - 1);
+        ctx.putImageData(imageData, 0, 0);
+        ctx.clearRect(0, canvas.height - 1, canvas.width, 1);
+        
+        for (let x = 0; x < canvas.width; x++) {
+          let r = 0, g = 0, b = 0;
+          
+          if (Math.abs(x - centerX) < 1 + Math.random()) {
+            const intensity = 150 + Math.random() * 105;
+            r = intensity;
+            b = intensity;
+          } else {
+            b = 10 + Math.random() * 40;
+          }
+          
+          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          ctx.fillRect(x, canvas.height - 1, 1, 1);
+        }
+      }, 30);
+    }
+
+    // Recording functions
+    function startRecording() {
+      recorder = new MediaRecorder(dest.stream);
+      chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const file = new File([blob], "morse_recording.webm", { type: "audio/webm" });
+        const url = URL.createObjectURL(file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.name;
+        link.click();
+      };
+      recorder.start();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      logToConsole("Recording started...");
+    }
+
+    function stopRecording() {
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        logToConsole("Recording saved");
+      }
+    }
+
+    // Initialize everything
+    init();
+    setInterval(drawWaterfallLine, 30);
+  </script>
 </body>
 </html>
