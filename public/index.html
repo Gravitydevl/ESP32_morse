@@ -51,6 +51,15 @@
     const duration = data.type === 'dot' ? 0.1 : 0.3;
     playTone(data.frequency || 600, duration);
   };
+  
+  setInterval(() => {
+  const type = Math.random() > 0.5 ? 'dot' : 'dash';
+  const freq = 600 + Math.random() * 100;
+  socket.dispatchEvent(new MessageEvent('message', {
+    data: JSON.stringify({ type, frequency: freq })
+  }));
+}, 300);
+
 
   drawWaterfall();
 </script>
