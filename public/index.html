@@ -155,7 +155,7 @@
     <div class="left-panel">
       <h3>Active Channels</h3>
       <div class="active-channels" id="activeChannels">
-        <!-- Channels will be populated by JavaScript -->
+        <div class="channel-item active">444 (1 user)</div>
       </div>
     </div>
     
@@ -173,8 +173,6 @@
       <div class="controls">
         <button id="showChars" class="active">Characters</button>
         <button id="showSymbols">Symbols</button>
-        <button id="startRec">Start Recording</button>
-        <button id="stopRec" disabled>Stop & Download</button>
         <button id="clearConsole">Clear Console</button>
       </div>
       
@@ -188,7 +186,15 @@
     </div>
   </div>
 
+  <script src="https://js.pusher.com/7.0/pusher.min.js"></script>
   <script>
+    // Инициализация Pusher с вашими ключами
+    const pusher = new Pusher('7a7fdb60bf55d8ff0dbb', {
+      cluster: 'eu',
+      forceTLS: true,
+      authEndpoint: '/api/pusher-auth'
+    });
+
     // Morse decoder configuration
     const morseCode = {
       '.-': 'A', '-...': 'B', '-.-.': 'C', '-..': 'D', '.': 'E',
@@ -206,8 +212,6 @@
       '-.-.--': '!'
     };
 
-
-
     // DOM elements
     const canvas = document.getElementById("waterfall");
     const ctx = canvas.getContext("2d");
@@ -220,6 +224,7 @@
     const clearConsoleBtn = document.getElementById("clearConsole");
     const consoleHeader = document.getElementById("consoleHeader");
     const activeChannels = document.getElementById("activeChannels");
+    const changeChannelBtn = document.getElementById("changeChannel");
 
     // App state
     let currentChannel = 444;
@@ -231,35 +236,98 @@
     let decoderTimeout = null;
     let wordTimeout = null;
     let consoleVisible = true;
-    let activeUsers = {};
+    let activeUsers = {444: 1};
+    let pusherChannel = null;
+    const mySenderId = `user_${Math.random().toString(36).substr(2, 9)}`;
+    const centerX = canvas.width / 2;
 
     // Audio context
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     let oscillator = null;
     let noiseNode = null;
-    const centerX = canvas.width / 2;
+
+    // Initialize Pusher connection
+    function initPusher() {
+      if (pusherChannel) {
+        pusher.unsubscribe(`private-morse-${currentChannel}`);
+      }
+      
+      pusherChannel = pusher.subscribe(`private-morse-${currentChannel}`);
+      
+      pusherChannel.bind('signal', (data) => {
+        if (data.senderId !== mySenderId) {
+          handleRemoteSignal(data.symbol, data.duration);
+        }
+      });
+      
+      pusherChannel.bind('pusher:subscription_succeeded', () => {
+        logToConsole(`Connected to channel ${currentChannel}`, 'info');
+      });
+    }
+
+    // Handle signals from other users
+    function handleRemoteSignal(symbol, duration) {
+      signalIndicator.classList.add('active');
+      drawSignalOnWaterfall(duration);
+      playTone(duration);
+      
+      setTimeout(() => {
+        signalIndicator.classList.remove('active');
+        processRemoteSignal(symbol, duration);
+      }, duration);
+    }
+
+    function processRemoteSignal(symbol, duration) {
+      const now = Date.now();
+      const signalGap = now - lastSymbolTime;
+      
+      if (symbol === '.') {
+        currentSymbol += '.';
+        if (displayMode === 'symbols') {
+          logToConsole('.', 'symbol');
+        }
+      } else if (symbol === '-') {
+        currentSymbol += '-';
+        if (displayMode === 'symbols') {
+          logToConsole('-', 'symbol');
+        }
+      }
+      
+      if (signalGap > 700 && currentWord) {
+        currentWord += ' ';
+        if (displayMode === 'chars') {
+          logToConsole(' ', 'word');
+        }
+      }
+      
+      resetDecoderTimeout();
+      resetWordTimeout();
+      lastSymbolTime = now;
+    }
 
     // Initialize
     function init() {
       drawFullNoiseBackground();
       startNoise();
       setupEventListeners();
-      logToConsole(`Connected to channel ${currentChannel}`, 'info');
-      
-      // Initialize active users
-      activeUsers[currentChannel] = 1;
-      
-      // Simulate active channels updates
-      setInterval(updateActiveChannels, 5000);
+      initPusher();
       updateActiveChannels();
+      
+      setInterval(drawWaterfallLine, 30);
     }
 
     function setupEventListeners() {
       // Transmission controls
-      btn.onmousedown = startTransmit;
-      btn.onmouseup = stopTransmit;
-      btn.ontouchstart = e => { e.preventDefault(); startTransmit(); };
-      btn.ontouchend = e => { e.preventDefault(); stopTransmit(); };
+      btn.addEventListener('mousedown', startTransmit);
+      btn.addEventListener('mouseup', stopTransmit);
+      btn.addEventListener('touchstart', e => {
+        e.preventDefault();
+        startTransmit();
+      });
+      btn.addEventListener('touchend', e => {
+        e.preventDefault();
+        stopTransmit();
+      });
 
       document.addEventListener("keydown", e => {
         if (e.code === "Space") {
@@ -276,17 +344,15 @@
       });
 
       // Display mode
-      showCharsBtn.onclick = () => setDisplayMode('chars');
-      showSymbolsBtn.onclick = () => setDisplayMode('symbols');
-      clearConsoleBtn.onclick = clearConsole;
+      showCharsBtn.addEventListener('click', () => setDisplayMode('chars'));
+      showSymbolsBtn.addEventListener('click', () => setDisplayMode('symbols'));
+      clearConsoleBtn.addEventListener('click', clearConsole);
 
       // Channel control
-      document.getElementById("changeChannel").onclick = changeChannel;
+      changeChannelBtn.addEventListener('click', changeChannel);
 
       // Console toggle
-      consoleHeader.onclick = toggleConsole;
-
-      // Simulate incoming signal
+      consoleHeader.addEventListener('click', toggleConsole);
     }
 
     // Waterfall display
@@ -301,18 +367,13 @@
     }
 
     function drawWaterfallLine() {
-      // Shift image up
       const imageData = ctx.getImageData(0, 1, canvas.width, canvas.height - 1);
       ctx.putImageData(imageData, 0, 0);
-      
-      // Clear bottom line
       ctx.clearRect(0, canvas.height - 1, canvas.width, 1);
       
-      // Draw new line at bottom
       for (let x = 0; x < canvas.width; x++) {
         let r = 0, g = 0, b = 0;
 
-        // Thin signal (1-2 pixels wide)
         if (isTransmitting && Math.abs(x - centerX) < 1 + Math.random()) {
           const intensity = 150 + Math.random() * 105;
           r = intensity;
@@ -335,13 +396,37 @@
       lastSymbolTime = Date.now();
     }
 
-    function stopTransmit() {
+    async function stopTransmit() {
       if (!isTransmitting) return;
       isTransmitting = false;
       stopTone();
       btn.classList.remove('transmitting');
       
       const duration = Date.now() - lastSymbolTime;
+      const symbol = duration >= 200 ? '-' : '.';
+      
+      // Send signal to Pusher
+      try {
+        const response = await fetch('/api/send-signal', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: currentChannel,
+            symbol,
+            duration,
+            senderId: mySenderId
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to send signal');
+        }
+      } catch (error) {
+        console.error('Error sending signal:', error);
+      }
+      
       processSignal(duration);
     }
 
@@ -349,7 +434,6 @@
       const now = Date.now();
       const signalGap = now - lastSymbolTime;
       
-      // Определяем тип сигнала (точка/тире)
       if (isTransmitting) {
         const isDash = duration >= 200;
         currentSymbol += isDash ? '-' : '.';
@@ -357,15 +441,13 @@
           logToConsole(isDash ? '-' : '.', 'symbol');
         }
       } 
-      // Определяем паузы между символами и словами
       else if (signalGap > 700 && currentWord) {
-        // Пауза между словами
         currentWord += ' ';
         if (displayMode === 'chars') {
           logToConsole(' ', 'word');
         }
-      } else if (signalGap > 200 && currentSymbol) {
-        // Пауза между символами
+      } 
+      else if (signalGap > 200 && currentSymbol) {
         if (displayMode === 'chars') {
           const char = morseCode[currentSymbol] || '?';
           logToConsole(char, 'char');
@@ -377,13 +459,11 @@
       lastSymbolTime = now;
     }
 
-
     function resetDecoderTimeout() {
       if (decoderTimeout) clearTimeout(decoderTimeout);
       
       decoderTimeout = setTimeout(() => {
         decodeSymbol();
-        // Add space between letters
         if (displayMode === 'chars' && currentWord) {
           logToConsole(' ', 'letter-space');
         }
@@ -428,6 +508,9 @@
         case 'word':
           span.className = 'word-space';
           break;
+        case 'letter-space':
+          span.className = 'letter-space';
+          break;
         default:
           span.style.color = '#03a9f4';
       }
@@ -453,21 +536,19 @@
     function changeChannel() {
       const newChannel = parseInt(channelInput.value);
       if (newChannel >= 1 && newChannel <= 999) {
-        // Remove from old channel
-        if (activeUsers[currentChannel]) {
-          activeUsers[currentChannel]--;
-          if (activeUsers[currentChannel] <= 0) {
-            delete activeUsers[currentChannel];
-          }
+        // Update active users count
+        activeUsers[currentChannel] -= 1;
+        if (activeUsers[currentChannel] <= 0) {
+          delete activeUsers[currentChannel];
         }
         
         currentChannel = newChannel;
-        
-        // Add to new channel
         activeUsers[currentChannel] = (activeUsers[currentChannel] || 0) + 1;
         
-        logToConsole(`Switched to channel ${currentChannel}`, 'info');
+        // Reinitialize Pusher connection
+        initPusher();
         updateActiveChannels();
+        logToConsole(`Switched to channel ${currentChannel}`, 'info');
       } else {
         logToConsole('Invalid channel (1-999)', 'error');
       }
@@ -476,25 +557,36 @@
     function updateActiveChannels() {
       activeChannels.innerHTML = '';
       
-      // Sort channels numerically
-      const sortedChannels = Object.keys(activeUsers)
-        .map(Number)
-        .sort((a, b) => a - b);
-      
-      sortedChannels.forEach(channel => {
-        const users = activeUsers[channel];
+      Object.entries(activeUsers).sort((a, b) => a[0] - b[0]).forEach(([channel, users]) => {
         const div = document.createElement('div');
-        div.className = `channel-item ${channel === currentChannel ? 'active' : ''}`;
+        div.className = `channel-item ${channel == currentChannel ? 'active' : ''}`;
         div.textContent = `${channel} (${users} user${users !== 1 ? 's' : ''})`;
-        div.onclick = () => {
+        div.addEventListener('click', () => {
           channelInput.value = channel;
           changeChannel();
-        };
+        });
         activeChannels.appendChild(div);
       });
     }
 
     // Audio functions
+    function playTone(duration) {
+      const oscillator = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+      gain.gain.value = 0.3;
+      
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.start();
+      
+      setTimeout(() => {
+        oscillator.stop();
+      }, duration);
+    }
+
     function startTone() {
       if (oscillator) return;
       stopNoise();
@@ -548,7 +640,6 @@
       logToConsole(`Display mode: ${mode}`, 'info');
     }
 
-
     function drawSignalOnWaterfall(duration) {
       const startTime = Date.now();
       const interval = setInterval(() => {
@@ -557,7 +648,6 @@
           return;
         }
         
-        // Draw signal line
         const imageData = ctx.getImageData(0, 1, canvas.width, canvas.height - 1);
         ctx.putImageData(imageData, 0, 0);
         ctx.clearRect(0, canvas.height - 1, canvas.width, 1);
@@ -581,7 +671,6 @@
 
     // Initialize everything
     init();
-    setInterval(drawWaterfallLine, 30);
   </script>
 </body>
 </html>

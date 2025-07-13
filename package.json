@@ -1,7 +1,0 @@
-{
-  "name": "esp32-morse",
-  "version": "1.0.0",
-  "description": "ESP32 Morse waterfall display",
-  "scripts": {},
-  "dependencies": {}
-}
