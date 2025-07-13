@@ -1,0 +1,12 @@
+{
+  "routes": [
+    {
+      "src": "/api/ws",
+      "dest": "api/ws.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "public/$1"
+    }
+  ]
+}
