@@ -67,10 +67,14 @@ function initPusher() {
   pusherChannel = pusher.subscribe(`private-morse-${currentChannel}`);
   
   pusherChannel.bind('signal', (data) => {
-    if (data.senderId !== mySenderId) {
-      handleRemoteSignal(data.signalType, data.frequency, data.channel);
-    }
-  });
+  console.log('Received signal:', data); // Для отладки
+  if (data.senderId !== mySenderId) {
+    const latency = Date.now() - data.serverTime;
+    console.log('Network latency:', latency, 'ms');
+    handleRemoteSignal(data);
+  }
+});
+
   
   pusherChannel.bind('pusher:subscription_succeeded', () => {
     logToConsole(`Connected to channel ${currentChannel}`, 'info');
@@ -232,19 +236,25 @@ async function stopTransmit() {
   const signalType = duration >= 200 ? '-' : '.';
   
   try {
-    await fetch('https://morse-for-render.onrender.com/api/send-signal', {
+    const response = await fetch('https://morse-for-render.onrender.com/api/send-signal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         channel: currentChannel,
         signalType,
         frequency,
-        senderId: mySenderId,
-        timestamp: Date.now() // Добавляем метку времени
+        senderId: mySenderId
       })
     });
+    
+    if (!response.ok) throw new Error('HTTP error');
+    const result = await response.json();
+    console.log('Signal sent:', result); // Для отладки
+    
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Transmission failed:', error);
+    // Можно добавить повторную попытку
+    setTimeout(() => stopTransmit(), 300);
   }
   
   processSignal(duration);
