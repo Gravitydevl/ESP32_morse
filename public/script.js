@@ -232,7 +232,7 @@ async function stopTransmit() {
   const signalType = duration >= 200 ? '-' : '.';
   
   try {
-    await fetch('https://your-render-app.onrender.com/api/send-signal', {
+    await fetch('https://morse-for-render.onrender.com/api/send-signal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
