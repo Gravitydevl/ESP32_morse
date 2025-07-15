@@ -2,7 +2,12 @@
 const pusher = new Pusher('30ec539f3967eb652483', {
   cluster: 'eu',
   authEndpoint: 'https://morse-for-render.onrender.com/pusher/auth',
-  forceTLS: true
+  forceTLS: true,
+  auth: {
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  }
 });
 
 // Конфигурация азбуки Морзе
@@ -88,6 +93,14 @@ function initPusher() {
   pusherChannel.bind('pusher:member_removed', () => {
     updateUserCount(currentChannel, pusherChannel.members.count);
   });
+  pusher.connection.bind('error', (err) => {
+    console.error('Pusher connection error:', err);
+  });
+
+  pusher.connection.bind('state_change', (states) => {
+    console.log('Connection state changed:', states);
+  });
+
 }
 
 // Обработка удаленных сигналов

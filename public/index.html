@@ -45,5 +45,17 @@
 
   <script src="https://js.pusher.com/7.0/pusher.min.js"></script>
   <script src="script.js"></script>
+  <div id="debug" style="position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px;"></div>
+
+  <script>
+  // Обновляем статус соединения
+  pusher.connection.bind('state_change', (states) => {
+    document.getElementById('debug').innerHTML = `
+      Pusher state: ${states.current}<br>
+      Channels: ${Object.keys(pusher.channels.all()).join(', ')}<br>
+      Last signal: ${new Date().toLocaleTimeString()}
+    `;
+  });
+  </script>
 </body>
 </html>
