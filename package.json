@@ -1,0 +1,7 @@
+{
+  "name": "morse-sdr-vercel",
+  "version": "1.0.0",
+  "dependencies": {
+    "pusher": "^5.1.1"
+  }
+}
