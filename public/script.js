@@ -233,7 +233,7 @@ async function stopTransmit() {
   
   // Отправка сигнала на сервер
   try {
-    await fetch('https://your-render-app.onrender.com/api/send-signal', {
+    await fetch('https://morse-for-render.onrender.com', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
