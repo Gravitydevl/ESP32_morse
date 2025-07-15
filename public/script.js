@@ -1,5 +1,5 @@
 // Инициализация Pusher (ЗАМЕНИТЕ your-render-app на ваш URL)
-const pusher = new Pusher('30ec539f3967eb652483', {
+const pusher = new Pusher('9c439cace3141db356ee', {
   cluster: 'eu',
   authEndpoint: 'https://morse-for-render.onrender.com',
   forceTLS: true
