@@ -1,7 +1,7 @@
 // Инициализация Pusher (ЗАМЕНИТЕ your-render-app на ваш URL)
-const pusher = new Pusher('9c439cace3141db356ee', {
+const pusher = new Pusher('30ec539f3967eb652483', {
   cluster: 'eu',
-  authEndpoint: 'https://morse-for-render.onrender.com',
+  authEndpoint: 'https://morse-for-render.onrender.com/pusher/auth',
   forceTLS: true
 });
 
@@ -231,26 +231,25 @@ async function stopTransmit() {
   const duration = Date.now() - lastSymbolTime;
   const signalType = duration >= 200 ? '-' : '.';
   
-  // Отправка сигнала на сервер
   try {
-    await fetch('https://morse-for-render.onrender.com', {
+    await fetch('https://your-render-app.onrender.com/api/send-signal', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         channel: currentChannel,
         signalType,
         frequency,
-        senderId: mySenderId
+        senderId: mySenderId,
+        timestamp: Date.now() // Добавляем метку времени
       })
     });
   } catch (error) {
-    console.error('Error sending signal:', error);
+    console.error('Error:', error);
   }
   
   processSignal(duration);
 }
+
 
 function processSignal(duration) {
   const now = Date.now();
