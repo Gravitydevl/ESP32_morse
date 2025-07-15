@@ -3,9 +3,9 @@ export default async function handler(req, res) {
     const Pusher = require('pusher');
     
     const pusher = new Pusher({
-      appId: '2021953',
-      key: '7a7fdb60bf55d8ff0dbb',
-      secret: '52463bf01284c69b4ddc',
+      appId: '2022942',
+      key: '30ec539f3967eb652483',
+      secret: '9c439cace3141db356ee',
       cluster: 'eu',
       useTLS: true
     });

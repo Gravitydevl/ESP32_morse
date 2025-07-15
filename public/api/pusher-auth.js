@@ -3,9 +3,9 @@ export default function handler(req, res) {
     const Pusher = require('pusher');
     
     const pusher = new Pusher({
-      appId: 'YOUR_APP_ID',
-      key: '7a7fdb60bf55d8ff0dbb',
-      secret: 'YOUR_SECRET_KEY',
+      appId: '2022942',
+      key: '30ec539f3967eb652483',
+      secret: '9c439cace3141db356ee',
       cluster: 'eu',
       useTLS: true
     });
